@@ -2,27 +2,28 @@ CC := gcc
 LDFLAGS := -lssl -lcrypto
 UNAME := $(shell uname)
 CERT := openssl req -newkey rsa:2048 -nodes -keyout key.pem -x509 -days 365 -out cert.pem
+SERVER := cd serverdata
 
 ifeq ($(UNAME), Darwin)
 CFLAGS := -I/usr/local/opt/openssl/include -L/usr/local/opt/openssl/lib
 endif
 
-all:
-	$(CERT)
+all: cert client server
 
-all: client server
+cert:
+	$(SERVER); $(CERT)
 
-client: client.o
-	$(CC) $(CFLAGS) -o client client.o $(LDFLAGS)
+client: clientdata/client.o
+	$(CC) $(CFLAGS) -o clientdata/client clientdata/client.o $(LDFLAGS)
 
-client.o: client.c
-	$(CC) $(CFLAGS) -c client.c
+client.o: clientdata/client.c
+	$(CC) $(CFLAGS) -c clientdata/client.c
 
-server: server.o
-	$(CC) $(CFLAGS) -o server server.o $(LDFLAGS)
+server: serverdata/server.o
+	$(CC) $(CFLAGS) -o serverdata/server serverdata/server.o $(LDFLAGS)
 
-server.o: server.c
-	$(CC) $(CFLAGS) -c server.c
+server.o: serverdata/server.c
+	$(CC) $(CFLAGS) -c serverdata/server.c
 
 clean:
-	rm -f server server.o client client.o
+	rm -f serverdata/server serverdata/server.o serverdata/cert.pem serverdata/key.pem clientdata/client clientdata/client.o
