@@ -50,6 +50,7 @@ int create_socket(char* hostname, unsigned int port)
   int                sockfd;
   struct hostent*    host;
   struct sockaddr_in dest_addr;
+  
 
   host = gethostbyname(hostname);
   if (host == NULL)
@@ -137,6 +138,11 @@ int main(int argc, char** argv)
   int               total = 0;
   SSL_CTX*          ssl_ctx;
   SSL*              ssl;
+  struct dirent* currentEntry;
+  struct stat    fileInfo;
+  char           olddir[PATHLENGTH];
+  char           dirname[PATHLENGTH];
+  DIR*           d;
   
   if (argc != 2)
     {
@@ -230,6 +236,60 @@ int main(int argc, char** argv)
       fgets(response, BUFFER_SIZE-1, stdin);
     }
   }
+	
+	//DIRECTORY STUFF
+	
+	
+  // Use current working directory if none specified
+  if (argc == 1) {
+    strncpy(dirname, ".", 2);
+  } else {
+    strncpy(dirname, argv[1], PATHLENGTH);
+    chdir(dirname);
+  }
+
+  // Save the current working directory so that stat will work properly
+  // when getting the size in bytes of files in a different directory
+  getcwd(olddir, PATHLENGTH);
+
+  // Open the directory and check for error
+  d = opendir(dirname);
+  if (d == NULL) {
+    fprintf(stderr, "Could not open directory %s: %s\n", dirname, strerror(errno));
+    return EXIT_FAILURE;
+  }
+
+  // Change to the directory being listed so that the calls to stat on each
+  // directory entry will work correctly
+  chdir(dirname);
+  
+  // Read each entry in the directory and display name and size 
+  currentEntry = readdir(d);
+  
+  // Iterate through all directory entries
+  while(currentEntry != NULL) {
+    
+    // Use stat to get the size of the file in bytes.  If the program is listing
+    // a directory other than the working directory of this program, the stat
+    // call here will not work properly since d_name is relative
+    if (stat(currentEntry->d_name, &fileInfo) < 0)
+      fprintf(stderr, "stat: %s: %s\n", currentEntry->d_name, strerror(errno));
+
+    // Check to see if the item is a subdirectory
+    if (S_ISDIR(fileInfo.st_mode)) {
+      fprintf(stdout, "%-30s\t<dir>\n", currentEntry->d_name);
+    } else {
+      fprintf(stdout, "%-30s\t%llu bytes\n", currentEntry->d_name, fileInfo.st_size);
+    }
+
+    // Get the next directory entry
+    currentEntry = readdir(d);    
+  }
+
+  // Change back to the original directory from where the program was invoked
+  chdir(olddir);
+  
+  closedir(d);
 
   // Deallocate memory for the SSL data structures and close the socket
   SSL_free(ssl);
