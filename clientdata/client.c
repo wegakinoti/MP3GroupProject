@@ -1,10 +1,8 @@
 /******************************************************************************
-
 PROGRAM:  client.c
 AUTHOR:   Tristan Chavez, Nhi La, Wega Kinoti
 COURSE:   CS469 - Distributed Systems (Regis University)
-SYNOPSIS: 
-
+SYNOPSIS:
 ******************************************************************************/
 #include <netdb.h>
 #include <errno.h>
@@ -32,6 +30,10 @@ SYNOPSIS:
 #include <unistd.h>
 #include <termios.h>
 
+#include <dirent.h>
+
+
+
 #define DEFAULT_PORT        4433
 #define DEFAULT_HOST        "localhost"
 #define MAX_HOSTNAME_LENGTH 256
@@ -40,10 +42,8 @@ SYNOPSIS:
 #define SEED_LENGTH         8
 
 /******************************************************************************
-
 This function does the basic necessary housekeeping to establish a secure TCP
 connection to the server specified by 'hostname'.
-
 *******************************************************************************/
 int create_socket(char* hostname, unsigned int port)
 {
@@ -89,7 +89,7 @@ int create_socket(char* hostname, unsigned int port)
   if (connect(sockfd, (struct sockaddr *) &dest_addr, sizeof(struct sockaddr)) <0)
     {
       fprintf(stderr, "Client: Cannot connect to host %s [%s] on port %d: %s\n",
-	      hostname, inet_ntoa(dest_addr.sin_addr), port, strerror(errno));
+          hostname, inet_ntoa(dest_addr.sin_addr), port, strerror(errno));
       exit(EXIT_FAILURE);
     }
 
@@ -127,9 +127,9 @@ int main(int argc, char** argv)
   char              remote_host[MAX_HOSTNAME_LENGTH];
   char              buffer[BUFFER_SIZE];
   char*             temp_ptr;
-  char	            response[BUFFER_SIZE];
-  char	            password[PASSWORD_LENGTH];
-  char	            username[BUFFER_SIZE];
+  char                response[BUFFER_SIZE];
+  char                password[PASSWORD_LENGTH];
+  char                username[BUFFER_SIZE];
   int               sockfd;
   int               writefd;
   int               rcount;
@@ -137,6 +137,12 @@ int main(int argc, char** argv)
   int               total = 0;
   SSL_CTX*          ssl_ctx;
   SSL*              ssl;
+    
+  struct dirent* currentEntry;
+  struct stat    fileInfo;
+  char           olddir[PATHLENGTH];
+  char           dirname[PATHLENGTH];
+  DIR*           d;
   
   if (argc != 2)
     {
@@ -148,17 +154,17 @@ int main(int argc, char** argv)
       // Search for ':' in the argument to see if port is specified
       temp_ptr = strchr(argv[1], ':');
       if (temp_ptr == NULL)    // Hostname only. Use default port
-	  strncpy(remote_host, argv[1], MAX_HOSTNAME_LENGTH);
+      strncpy(remote_host, argv[1], MAX_HOSTNAME_LENGTH);
       else
-	{
-	  // Argument is formatted as <hostname>:<port>. Need to separate
-	  // First, split out the hostname from port, delineated with a colon
-	  // remote_host will have the <hostname> substring
-	  strncpy(remote_host, strtok(argv[1], ":"), MAX_HOSTNAME_LENGTH);
-	  // Port number will be the substring after the ':'. At this point
-	  // temp is a pointer to the array element containing the ':'
-	  port = (unsigned int) atoi(temp_ptr+sizeof(char));
-	}
+    {
+      // Argument is formatted as <hostname>:<port>. Need to separate
+      // First, split out the hostname from port, delineated with a colon
+      // remote_host will have the <hostname> substring
+      strncpy(remote_host, strtok(argv[1], ":"), MAX_HOSTNAME_LENGTH);
+      // Port number will be the substring after the ':'. At this point
+      // temp is a pointer to the array element containing the ':'
+      port = (unsigned int) atoi(temp_ptr+sizeof(char));
+    }
     }
   
   // Initialize OpenSSL ciphers and digests
@@ -186,7 +192,7 @@ int main(int argc, char** argv)
   // to be negotiated between client and server
   SSL_CTX_set_options(ssl_ctx, SSL_OP_NO_SSLv2);
 
-  // Create a new SSL connection state object                     
+  // Create a new SSL connection state object
   ssl = SSL_new(ssl_ctx);
 
   // Create the underlying TCP socket connection to the remote host
@@ -230,6 +236,58 @@ int main(int argc, char** argv)
       fgets(response, BUFFER_SIZE-1, stdin);
     }
   }
+
+//Directory stuff
+    if (argc == 1) {
+      strncpy(dirname, ".", 2);
+    } else {
+      strncpy(dirname, argv[1], PATHLENGTH);
+      chdir(dirname);
+    }
+
+    // Save the current working directory so that stat will work properly
+    // when getting the size in bytes of files in a different directory
+    getcwd(olddir, PATHLENGTH);
+
+    // Open the directory and check for error
+    d = opendir(dirname);
+    if (d == NULL) {
+      fprintf(stderr, "Could not open directory %s: %s\n", dirname, strerror(errno));
+      return EXIT_FAILURE;
+    }
+
+    // Change to the directory being listed so that the calls to stat on each
+    // directory entry will work correctly
+    chdir(dirname);
+    
+    // Read each entry in the directory and display name and size
+    currentEntry = readdir(d);
+    
+    // Iterate through all directory entries
+    while(currentEntry != NULL) {
+      
+      // Use stat to get the size of the file in bytes.  If the program is listing
+      // a directory other than the working directory of this program, the stat
+      // call here will not work properly since d_name is relative
+      if (stat(currentEntry->d_name, &fileInfo) < 0)
+        fprintf(stderr, "stat: %s: %s\n", currentEntry->d_name, strerror(errno));
+
+      // Check to see if the item is a subdirectory
+      if (S_ISDIR(fileInfo.st_mode)) {
+        fprintf(stdout, "%-30s\t<dir>\n", currentEntry->d_name);
+      } else {
+        fprintf(stdout, "%-30s\t%lu bytes\n", currentEntry->d_name, fileInfo.st_size);
+      }
+
+      // Get the next directory entry
+      currentEntry = readdir(d);
+    }
+
+    // Change back to the original directory from where the program was invoked
+    chdir(olddir);
+    
+    closedir(d);
+    
 
   // Deallocate memory for the SSL data structures and close the socket
   SSL_free(ssl);
