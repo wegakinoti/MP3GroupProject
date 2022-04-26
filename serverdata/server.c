@@ -5,6 +5,22 @@ AUTHOR:   Tristan Chavez, Nhi La, Wega Kinoti
 COURSE:   CS469 - Distributed Systems (Regis University)
 SYNOPSIS: 
 
+To build the program, you must install both the libsdl2-dev library
+/           as well as the SDL2_mixer library:
+/
+/           sudo apt-get install -y libsdl2-dev libsdl2-mixer-2.0-0 libsdl2-mixer-dev
+/
+/           Then compile it and link with both the -lSDL2_mixer and -lSDL2
+/           DSOs:
+/
+/           gcc -o playaudio playaudio.c `sdl2-config --cflags --libs`
+/           -lSDL2_mixer
+/
+/           Note the installation of the SDL2 Mixer library has a dash, but linking
+/           the DSO uses an underscore
+/
+/           The sdl2-config part is enclosed in backticks, not single quotes
+
 ******************************************************************************/
 #include <fcntl.h>
 #include <stdio.h>
@@ -16,6 +32,13 @@ SYNOPSIS:
 #include <sys/socket.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+
+#include <errno.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_mixer.h>
+
 
 #define BUFFER_SIZE       256
 #define DEFAULT_PORT      4433
@@ -192,6 +215,15 @@ int main(int argc, char **argv)
     unsigned int sockfd;
     unsigned int port;
     char         buffer[BUFFER_SIZE];
+    
+    char buffer[128];             // Used to read the entire 128-byte ID3 tag
+    char title[31];               // 30-byte title field from the ID3 tag
+    char artist[31];              // 30-byte artist field from the ID3 tag
+    char album[31];               // 30-byte album field from the ID3 tag
+    char year[5];                 // 4-byte year field from the ID3 tag
+    int  flags  = MIX_INIT_MP3;   // Mix_Init initializer flags for MP3 files
+    int  result;
+    int  fd;
 
     // Initialize and create SSL data structures and algorithms
     init_openssl();
@@ -265,9 +297,86 @@ int main(int argc, char **argv)
 	  fprintf(stdout, "Server: Established SSL/TLS connection with client (%s)\n", client_addr);
 
 	// ************************************************************************
-	// NEW CODE HERE
+	// Play Audio Code Here
 	// ************************************************************************
+         
+          if (argc != 2) {
+             fprintf(stderr, "Usage: playaudio <mp3 file name>\n");
+             return EXIT_FAILURE;
+           }
 
+           // Open the MP3 file to get the metadata from the ID3 tag
+           fd = open(argv[1], O_RDONLY);
+           if (fd < 0) {
+             fprintf(stderr, "Could not open %s: %s\n", argv[1], strerror(errno));
+             return EXIT_FAILURE;
+           }
+
+           // MP3 metadata (ID3v1 format) is the last 128 bytes of the file. Note that
+           // ID3v2 uses the first 128 bytes.  Reposition 128 bytes from the end of
+           // the file so we can read the ID3 tag.
+           lseek(fd, -128L, SEEK_END);
+
+           // Read the 128-byte ID3 tag from the end of the file
+           read(fd, buffer, 128);
+           close(fd);
+
+           // First 3 bytes are "ID3". Next 30 bytes after that are the song title
+           strncpy(title, buffer+3, 30);
+           // Next 30 bytes after title are the artist name
+           strncpy(artist, buffer+33, 30);
+           // Next 30 bytes after artist are the album name
+           strncpy(album, buffer+63, 30);
+           // After the album name is the year the album was released
+           strncpy(year, buffer+93, 4);
+
+           printf("Now Playing:\n  Title: %s\n", title);
+           printf("  Artist: %s\n", artist);
+           printf("  Album: %s\n", album);
+           printf("  Year: %s\n", year);
+
+           // Initialize the SDL2 Mixer and check for error
+           result = Mix_Init(flags);
+           if (flags != result) {
+             fprintf(stderr, "Could not initialize mixer (result: %d).\n", result);
+             fprintf(stderr, "playaudio: %s\n", Mix_GetError());
+             return EXIT_FAILURE;
+           }
+
+           // Open the MP3 file. 44.1kHz represents the sample rate, 2 = stereo,
+           // and 1024 means the file will be processed in 1 KB chunks.
+           if (Mix_OpenAudio(44100, AUDIO_S16SYS, 2, 1024) < 0) {
+             fprintf(stderr, "playaudio: %s\n", Mix_GetError());
+             return EXIT_FAILURE;
+           }
+
+           // Loads the music file given on the command line
+           Mix_Music *music = Mix_LoadMUS(argv[1]);
+           if(!music) {
+             fprintf(stderr, "playaudio: %s\n", Mix_GetError());
+             return EXIT_FAILURE;
+           }
+
+           // Play the music! The second parameter sets the number of times to play
+           // the song. A value of -1 is used for looping.
+           Mix_PlayMusic(music, 1);
+
+           // This needs to be here otherwise the program terminates immediately.
+           // Delay value doesn't seem to matter much. Once the music stops playing,
+           // program exits the loop and terminates.
+           while (1) {
+             SDL_Delay(200);
+             if (Mix_PlayingMusic() == 0)
+               break;
+           }
+
+           // Clean up dynamically allocated memory
+           Mix_FreeMusic(music);
+           Mix_CloseAudio();
+           Mix_Quit();
+          
+          
+          
 	
         // File transfer complete
 	fprintf(stdout, "Server: Completed file transfer to client (%s)\n", client_addr);
