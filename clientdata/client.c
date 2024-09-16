@@ -40,6 +40,11 @@ SYNOPSIS:
 #define BUFFER_SIZE         256
 #define PASSWORD_LENGTH     32
 #define SEED_LENGTH         8
+#define PATH_LENGTH         248     //added
+
+#define ERR_TOO_FEW_ARGS  1         //added
+#define ERR_TOO_MANY_ARGS 2         //added
+#define ERR_INVALID_OP    3         //added
 
 /******************************************************************************
 This function does the basic necessary housekeeping to establish a secure TCP
@@ -125,7 +130,8 @@ int main(int argc, char** argv)
   const SSL_METHOD* method;
   unsigned int      port = DEFAULT_PORT;
   char              remote_host[MAX_HOSTNAME_LENGTH];
-  char              buffer[BUFFER_SIZE];
+  char              buffer[BUFFER_SIZE] = {0};
+  char              filename[PATH_LENGTH] = {0};    //added
   char*             temp_ptr;
   char                response[BUFFER_SIZE];
   char                password[PASSWORD_LENGTH];
@@ -134,6 +140,7 @@ int main(int argc, char** argv)
   int               writefd;
   int               rcount;
   int               wcount;
+  int               error_code;                     //added
   int               total = 0;
   SSL_CTX*          ssl_ctx;
   SSL*              ssl;
@@ -236,6 +243,45 @@ int main(int argc, char** argv)
       fgets(response, BUFFER_SIZE-1, stdin);
     }
   }
+	
+  //DOWNLOAD
+  fprintf(stdout, "Enter file name: ");
+  fgets(filename, PATH_LENGTH, stdin);
+  filename[strlen(filename)-1] = '\0';
+
+  // Marshal the parameter into an RPC message
+  sprintf(buffer, "download %s", filename);
+  SSL_write(ssl, buffer, strlen(buffer) + 1);
+
+  // Clear the buffer and await the reply
+  bzero(buffer, BUFFER_SIZE);
+  rcount = SSL_read(ssl, buffer, BUFFER_SIZE);
+  if (sscanf(buffer, "rpcerror %d", &error_code) == 1) {
+    fprintf(stderr, "Client: Bad request: ");
+    switch(error_code) {
+    case ERR_INVALID_OP:
+      fprintf(stderr, "Invalid message format\n");
+      break;
+    case ERR_TOO_FEW_ARGS:
+      fprintf(stderr, "No filename specified\n");
+      break;
+    case ERR_TOO_MANY_ARGS:
+      fprintf(stderr, "Too many file names provided\n");
+      break;
+    }
+  } else if (sscanf(buffer, "fileerror %d", &error_code) == 1) {
+    fprintf(stderr, "Client: Could not retrieve file: %s\n", strerror(error_code));
+  } else {
+    writefd = creat(filename, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    do {
+      total += rcount;
+      write(writefd, buffer, rcount);
+      rcount = SSL_read(ssl, buffer, BUFFER_SIZE);
+    } while (rcount > 0);
+    close(writefd);
+    fprintf(stdout, "Client: Successfully transferred file '%s' (%d bytes) from server\n", filename, total);
+  }
+
 
 //Directory stuff
     if (argc == 1) {
